@@ -4,6 +4,7 @@ name: gitea
 networks:
   private:
   public:
+  runner:
 
 
 secrets:
@@ -98,7 +99,7 @@ services:
     restart: always
     logging: *logging50m
     networks:
-      - private
+      - runner
     depends_on:
       - gitea
     secrets:
@@ -107,7 +108,7 @@ services:
       GITEA_INSTANCE_URL: "https://${domain_fqdn}"
       GITEA_RUNNER_REGISTRATION_TOKEN_FILE: /run/secrets/runner_token
       GITEA_RUNNER_NAME: "local-docker"
-      GITEA_RUNNER_LABELS: "local,docker"
+      GITEA_RUNNER_LABELS: "ubuntu-latest:docker://node:20-slim,ubuntu-22.04:docker://node:20-slim"
     volumes:
       - ./runner/cache:/root/.cache
       - ./runner/data:/data
