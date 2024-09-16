@@ -1,0 +1,115 @@
+name: gitea
+
+
+networks:
+  private:
+  public:
+
+
+secrets:
+  runner_token:
+    file: runner/token.txt
+
+
+services:
+  
+  traefik:
+    image: traefik:v${traefik_version}
+    restart: always
+    logging: &logging50m
+      options:
+        max-size: 50m
+    command:
+      - "--api=false"
+      - "--api.dashboard=false"
+      - "--providers.docker=true"
+      - "--providers.docker.exposedbydefault=false"
+      - "--entrypoints.http.address=:80"
+      - "--entrypoints.http.http.redirections.entrypoint.to=https"
+      - "--entrypoints.http.http.redirections.entrypoint.scheme=https"
+      - "--entrypoints.https.address=:443"
+      - "--entrypoints.ssh-git.address=:22"
+      - "--certificatesresolvers.le.acme.tlschallenge=true"
+      - "--certificatesresolvers.le.acme.email=${acme_email}"
+      - "--certificatesresolvers.le.acme.storage=/letsencrypt/acme.json"
+      - "--certificatesresolvers.le-staging.acme.tlschallenge=true"
+      - "--certificatesresolvers.le-staging.acme.email=${acme_email}"
+      - "--certificatesresolvers.le-staging.acme.storage=/letsencrypt/acme-staging.json"
+      - "--certificatesresolvers.le-staging.acme.caserver=https://acme-staging.api.letsencrypt.org/directory"
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.middlewares.rl.ratelimit.average=${ratelimit_average}"
+      - "traefik.http.middlewares.rl.ratelimit.burst=${ratelimit_burst}"
+    networks:
+      - private
+      - public
+    ports:
+      - "${gitea_ssh_port}:22"
+      - "80:80"
+      - "443:443"
+    volumes:
+      - "/var/run/docker.sock:/var/run/docker.sock:ro"
+      - "./cert:/letsencrypt"
+
+  db:
+    image: mysql:8
+    restart: always
+    logging: *logging50m
+    environment:
+      - MYSQL_RANDOM_ROOT_PASSWORD=1
+      - MYSQL_USER=gitea
+      - MYSQL_PASSWORD=gitea
+      - MYSQL_DATABASE=gitea
+    networks:
+      - private
+    volumes:
+      - ./db:/var/lib/mysql
+
+  gitea:
+    image: gitea/gitea:${gitea_version}-rootless
+    restart: always
+    logging: *logging50m
+    networks:
+      - private
+    depends_on:
+      - traefik
+      - db
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.services.gitea-web.loadbalancer.server.port=3000"
+      - "traefik.http.routers.gitea-web.rule=Host(`${domain_fqdn}`)"
+      - "traefik.http.routers.gitea-web.entrypoints=https"
+      - "traefik.http.routers.gitea-web.tls.certresolver=le"
+      - "traefik.http.routers.gitea-web.middlewares=rl"
+      - "traefik.http.routers.gitea-web.service=gitea-web"
+      - "traefik.tcp.services.gitea-ssh.loadbalancer.server.port=2222"
+      - "traefik.tcp.routers.gitea-ssh.rule=HostSNI(`*`)"
+      - "traefik.tcp.routers.gitea-ssh.entrypoints=ssh-git"
+      - "traefik.tcp.routers.gitea-ssh.service=gitea-ssh"
+    volumes:
+      - ./data:/var/lib/gitea
+      - ./config:/etc/gitea
+      - /etc/timezone:/etc/timezone:ro
+      - /etc/localtime:/etc/localtime:ro
+
+%{ if length(gitea_runner_version) > 0 }
+  runner:
+    image: gitea/act_runner:${gitea_runner_version}
+    restart: always
+    logging: *logging50m
+    networks:
+      - private
+    depends_on:
+      - gitea
+    secrets:
+      - runner_token
+    environment:
+      GITEA_INSTANCE_URL: "https://${domain_fqdn}"
+      GITEA_RUNNER_REGISTRATION_TOKEN_FILE: /run/secrets/runner_token
+      GITEA_RUNNER_NAME: "local-docker"
+      GITEA_RUNNER_LABELS: "local,docker"
+    volumes:
+      - ./runner/cache:/root/.cache
+      - ./runner/data:/data
+      - /var/run/docker.sock:/var/run/docker.sock
+%{ endif }

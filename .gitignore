@@ -1,0 +1,8 @@
+.code/
+.idea/
+
+**/.terraform*
+**/*.tfstate*
+
+**/.env*
+**/*.tfvars
